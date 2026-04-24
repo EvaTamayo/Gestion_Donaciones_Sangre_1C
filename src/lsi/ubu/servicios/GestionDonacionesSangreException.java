@@ -36,7 +36,7 @@ public class GestionDonacionesSangreException extends SQLException {
 
 	public GestionDonacionesSangreException(int code) {
 		codigo = code;
-		String mensaje = null;
+		mensaje = null;
 
 		switch (code) {
 		case DONANTE_NO_EXISTE:
@@ -46,10 +46,10 @@ public class GestionDonacionesSangreException extends SQLException {
 			mensaje = "Tipo Sangre inexistente";
 			break;
 		case HOSPITAL_NO_EXISTE:
-			mensaje = "Hospital ocupado";
+			mensaje = "Hospital inexistente";
 			break;
 		case DONANTE_EXCEDE:
-			mensaje = "Donante excede el cupo de donación”.";
+			mensaje = "Donante excede el cupo de donación";
 			break;
 		case VALOR_CANTIDAD_DONACION_INCORRECTO:
 			mensaje = "Valor de cantidad de donación incorrecto";
