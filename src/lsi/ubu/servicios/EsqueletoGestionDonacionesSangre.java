@@ -215,31 +215,85 @@ public class EsqueletoGestionDonacionesSangre {
 	static public void creaTablas() {
 		ExecuteScript.run(script_path + "gestion_donaciones_sangre.sql");
 	}
+	
+	static void reiniciaDatos() throws SQLException {
+		PoolDeConexiones pool = PoolDeConexiones.getInstance();
 
-	static void tests() throws SQLException{
-		creaTablas();
-		
-		PoolDeConexiones pool = PoolDeConexiones.getInstance();		
-		
-		//Relatar caso por caso utilizando el siguiente procedure para inicializar los datos
-		
-		CallableStatement cll_reinicia=null;
+		CallableStatement cll_reinicia = null;
 		Connection conn = null;
-		
+
 		try {
-			//Reinicio filas
 			conn = pool.getConnection();
 			cll_reinicia = conn.prepareCall("{call inicializa_test}");
 			cll_reinicia.execute();
-		} catch (SQLException e) {				
-			logger.error(e.getMessage());			
 		} finally {
-			if (cll_reinicia!=null) cll_reinicia.close();
-			if (conn!=null) conn.close();
-		
-		}	
-		//Comprovación simple de caso correcto (sustituir por tests mas adelante)
-		realizar_donacion("12345678A", 1, 0.30f, java.sql.Date.valueOf("2025-02-20"));
-		System.out.println("realizar_donacion ejecutado");
+			if (cll_reinicia != null) cll_reinicia.close();
+			if (conn != null) conn.close();
+		}
+	}
+
+	static void tests() throws SQLException {
+		creaTablas();
+
+		// Caso 1: correcto
+		try {
+			reiniciaDatos();
+			realizar_donacion("12345678A", 1, 0.30f, java.sql.Date.valueOf("2025-02-20"));
+			System.out.println("OK caso correcto");
+		} catch (SQLException e) {
+			System.out.println("FALLO caso correcto: " + e.getMessage());
+		}
+
+		// Caso 2: donante inexistente
+		try {
+			reiniciaDatos();
+			realizar_donacion("00000000Z", 1, 0.30f, java.sql.Date.valueOf("2025-02-20"));
+			System.out.println("FALLO donante inexistente: no lanzó excepción");
+		} catch (GestionDonacionesSangreException e) {
+			if (e.getErrorCode() == GestionDonacionesSangreException.DONANTE_NO_EXISTE) {
+				System.out.println("OK donante inexistente");
+			} else {
+				System.out.println("FALLO donante inexistente: código " + e.getErrorCode());
+			}
+		}
+
+		// Caso 3: hospital inexistente
+		try {
+			reiniciaDatos();
+			realizar_donacion("12345678A", 99, 0.30f, java.sql.Date.valueOf("2025-02-20"));
+			System.out.println("FALLO hospital inexistente: no lanzó excepción");
+		} catch (GestionDonacionesSangreException e) {
+			if (e.getErrorCode() == GestionDonacionesSangreException.HOSPITAL_NO_EXISTE) {
+				System.out.println("OK hospital inexistente");
+			} else {
+				System.out.println("FALLO hospital inexistente: código " + e.getErrorCode());
+			}
+		}
+
+		// Caso 4: cantidad incorrecta
+		try {
+			reiniciaDatos();
+			realizar_donacion("12345678A", 1, 0.60f, java.sql.Date.valueOf("2025-02-20"));
+			System.out.println("FALLO cantidad incorrecta: no lanzó excepción");
+		} catch (GestionDonacionesSangreException e) {
+			if (e.getErrorCode() == GestionDonacionesSangreException.VALOR_CANTIDAD_DONACION_INCORRECTO) {
+				System.out.println("OK cantidad incorrecta");
+			} else {
+				System.out.println("FALLO cantidad incorrecta: código " + e.getErrorCode());
+			}
+		}
+
+		// Caso 5: donante excede 15 días
+		try {
+			reiniciaDatos();
+			realizar_donacion("12345678A", 1, 0.30f, java.sql.Date.valueOf("2025-01-20"));
+			System.out.println("FALLO donante excede: no lanzó excepción");
+		} catch (GestionDonacionesSangreException e) {
+			if (e.getErrorCode() == GestionDonacionesSangreException.DONANTE_EXCEDE) {
+				System.out.println("OK donante excede");
+			} else {
+				System.out.println("FALLO donante excede: código " + e.getErrorCode());
+			}
+		}
 	}
 }
