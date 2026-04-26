@@ -195,20 +195,112 @@ public class EsqueletoGestionDonacionesSangre {
 				
 		PoolDeConexiones pool = PoolDeConexiones.getInstance();
 		Connection con=null;
+PreparedStatement pst_check = null;
+		PreparedStatement pst_query = null;
+		ResultSet rs = null;
 
 	
 		try{
 			con = pool.getConnection();
-			//Completar por el alumno
+
+
+			//Verificar que el tipo de sangre existe en tipo_sangre.
+			pst_check = con.prepareStatement(
+					"SELECT id_tipo_sangre FROM tipo_sangre WHERE UPPER(descripcion) = UPPER(?)");
+			pst_check.setString(1, m_Tipo_Sangre);
+			rs = pst_check.executeQuery();
+
+			if (!rs.next()) {
+				throw new GestionDonacionesSangreException(
+						GestionDonacionesSangreException.TIPO_SANGRE_NO_EXISTE);
+			}
+			rs.close();
+			rs = null;
+
+			
+			// Consulta principal: traspaso + tipo_sangre + hospital (x2)
+			//    + reserva_hospital (x2), ordenada por id_hospital_destino
+			//    y fecha_traspaso 
+			pst_query = con.prepareStatement(
+					"SELECT "
+					+ "  t.id_traspaso, "
+					+ "  ts.descripcion     AS tipo_sangre, "
+					+ "  h_orig.nombre      AS hosp_origen, "
+					+ "  h_orig.localidad   AS loc_origen, "
+					+ "  h_dest.nombre      AS hosp_destino, "
+					+ "  h_dest.localidad   AS loc_destino, "
+					+ "  t.cantidad, "
+					+ "  t.fecha_traspaso, "
+					+ "  rh_orig.cantidad   AS reserva_origen, "
+					+ "  rh_dest.cantidad   AS reserva_destino "
+					+ "FROM traspaso t "
+					+ "  JOIN tipo_sangre ts  ON t.id_tipo_sangre      = ts.id_tipo_sangre "
+					+ "  JOIN hospital h_orig ON t.id_hospital_origen  = h_orig.id_hospital "
+					+ "  JOIN hospital h_dest ON t.id_hospital_destino = h_dest.id_hospital "
+					+ "  LEFT JOIN reserva_hospital rh_orig "
+					+ "       ON t.id_tipo_sangre = rh_orig.id_tipo_sangre "
+					+ "       AND t.id_hospital_origen  = rh_orig.id_hospital "
+					+ "  LEFT JOIN reserva_hospital rh_dest "
+					+ "       ON t.id_tipo_sangre = rh_dest.id_tipo_sangre "
+					+ "       AND t.id_hospital_destino = rh_dest.id_hospital "
+					+ "WHERE UPPER(ts.descripcion) = UPPER(?) "
+					+ "ORDER BY t.id_hospital_destino, t.fecha_traspaso");
+
+			pst_query.setString(1, m_Tipo_Sangre);
+			rs = pst_query.executeQuery();
+
+			
+			// 3. Mostrar resultados por consola
+			System.out.println("\n--- Traspasos de tipo: " + m_Tipo_Sangre + " ---");
+			System.out.printf("%-5s %-10s %-28s %-28s %-8s %-12s %-13s %-13s%n",
+					"ID", "Tipo", "Hospital origen", "Hospital destino",
+					"Cantidad", "Fecha", "Reserva orig.", "Reserva dest.");
+			System.out.println("---------------------------------------------------------------------------------------------------------");
+
+			int total = 0;
+			while (rs.next()) {
+				System.out.printf("%-5d %-10s %-28s %-28s %-8.2f %-12s %-13.2f %-13.2f%n",
+						rs.getInt("id_traspaso"),
+						rs.getString("tipo_sangre"),
+						rs.getString("hosp_origen") + " (" + rs.getString("loc_origen") + ")",
+						rs.getString("hosp_destino") + " (" + rs.getString("loc_destino") + ")",
+						rs.getFloat("cantidad"),
+						rs.getDate("fecha_traspaso").toString(),
+						rs.getFloat("reserva_origen"),
+						rs.getFloat("reserva_destino"));
+				total++;
+			}
+
+			if (total == 0) {
+				System.out.println("  (No hay traspasos para este tipo de sangre)");
+			}
+			System.out.println("Total: " + total + " traspaso(s)\n");
+
+			// Exito -> commit
+			con.commit();
 			
 		} catch (SQLException e) {
-			//Completar por el alumno			
-			
-			logger.error(e.getMessage());
-			throw e;		
+            // En cualquier excepcion se deshacen los cambios de la transaccion
+            if (con != null) {
+            con.rollback();
+            }
+
+           // Las excepciones propias de la practica solo se relanzan
+           // al metodo que haya llamado a la transaccion.
+           if (e instanceof GestionDonacionesSangreException) {
+              throw e;
+            }
+
+    // Las SQLException normales se registran en el logger
+    // y tambien se relanzan.
+    logger.error(e.getMessage());
+    throw e;		
 
 		} finally {
-			/*A rellenar por el alumno*/
+			if (rs        != null) try { rs.close();        } catch (SQLException ex) { logger.error(ex.getMessage()); }
+            if (pst_query != null) try { pst_query.close(); } catch (SQLException ex) { logger.error(ex.getMessage()); }
+            if (pst_check != null) try { pst_check.close(); } catch (SQLException ex) { logger.error(ex.getMessage()); }
+            if (con       != null) try { con.close();       } catch (SQLException ex) { logger.error(ex.getMessage()); }
 		}		
 	}
 	
@@ -294,6 +386,67 @@ public class EsqueletoGestionDonacionesSangre {
 			} else {
 				System.out.println("FALLO donante excede: código " + e.getErrorCode());
 			}
+		}
+
+
+		// TESTS DE consulta_traspasos
+
+		// Caso 6: Tipo existente CON traspasos -> muestra filas
+		try {
+			reiniciaDatos();
+			consulta_traspasos("Tipo A.");
+			System.out.println("OK consulta Tipo A");
+		} catch (SQLException e) {
+			System.out.println("FALLO consulta Tipo A: " + e.getMessage());
+		}
+
+	
+		// Caso 7: Tipo existente CON traspasos -> 'Tipo B.'
+		try {
+			reiniciaDatos();
+			consulta_traspasos("Tipo B.");
+			System.out.println("OK consulta Tipo B");
+		} catch (SQLException e) {
+			System.out.println("TEST 2 ERROR inesperado: " + e.getMessage());
+		}
+
+		
+		// Caso 8: Tipo existente SIN traspasos -> lista vacia, sin excepcion
+		// 'Tipo O.' existe en tipo_sangre pero no tiene traspasos en los datos
+		try {
+			reiniciaDatos();
+			consulta_traspasos("Tipo O.");
+			System.out.println("TEST 3 OK: lista vacia, sin excepcion");
+		} catch (GestionDonacionesSangreException e) {
+			System.out.println("TEST 3 ERROR: no debia lanzar excepcion, codigo=" + e.getErrorCode());
+		} catch (SQLException e) {
+			System.out.println("TEST 3 ERROR inesperado: " + e.getMessage());
+		}
+
+		// Caso 9: Tipo NO existe -> GestionDonacionesSangreException codigo 2
+		try {
+			reiniciaDatos();
+			consulta_traspasos("Tipo X.");
+			System.out.println("TEST 4 ERROR: debia lanzar GestionDonacionesSangreException codigo 2");
+		} catch (GestionDonacionesSangreException e) {
+			if (e.getErrorCode() == GestionDonacionesSangreException.TIPO_SANGRE_NO_EXISTE) {
+				System.out.println("TEST 4 OK: excepcion correcta. Codigo="
+						+ e.getErrorCode() + " Mensaje=" + e.getMessage());
+			} else {
+				System.out.println("TEST 4 ERROR: codigo incorrecto=" + e.getErrorCode());
+			}
+		}
+
+		
+		// Caso 10: Verificacion del orden (id_hospital_destino, fecha_traspaso)
+		// 'Tipo A.' tiene: destino=2 el 11/01 y destino=3 el 16/01
+		try {
+			reiniciaDatos();
+			System.out.println("Esperado: primero Aranda(id=2) fecha=11/01, luego Leon(id=3) fecha=16/01");
+			consulta_traspasos("Tipo A.");
+			System.out.println("TEST 5 OK: verifique visualmente el orden");
+		} catch (SQLException e) {
+			System.out.println("TEST 5 ERROR inesperado: " + e.getMessage());
 		}
 	}
 }
