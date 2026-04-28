@@ -172,20 +172,173 @@ public class EsqueletoGestionDonacionesSangre {
 		
 		PoolDeConexiones pool = PoolDeConexiones.getInstance();
 		Connection con=null;
-
+		    PreparedStatement psTipoSangre = null;
+		    PreparedStatement psHospitalOrigen = null;
+		    PreparedStatement psHospitalDestino = null;
+		    PreparedStatement psTraspasos = null;
+		    PreparedStatement psUpdateDestino = null;
+		    PreparedStatement psUpdateOrigen = null;
+		    PreparedStatement psDeleteTraspasos = null;
+		    ResultSet rs = null;
 	
 		try{
 			con = pool.getConnection();
-			//Completar por el alumno
+
+		        // Comprobar que existe el tipo de sangre
+		        psTipoSangre = con.prepareStatement(
+		                "SELECT id_tipo_sangre FROM tipo_sangre WHERE id_tipo_sangre = ?");
+		        psTipoSangre.setInt(1, m_ID_Tipo_Sangre);
+		        rs = psTipoSangre.executeQuery();
+
+		        if (!rs.next()) {
+		            throw new GestionDonacionesSangreException(
+		                    GestionDonacionesSangreException.TIPO_SANGRE_NO_EXISTE);
+		        }
+
+		        rs.close();
+		        rs = null;
+
+		        // Comprobar que existe el hospital origen
+		        psHospitalOrigen = con.prepareStatement(
+		                "SELECT id_hospital FROM hospital WHERE id_hospital = ?");
+		        psHospitalOrigen.setInt(1, m_ID_Hospital_Origen);
+		        rs = psHospitalOrigen.executeQuery();
+
+		        if (!rs.next()) {
+		            throw new GestionDonacionesSangreException(
+		                    GestionDonacionesSangreException.HOSPITAL_NO_EXISTE);
+		        }
+
+		        rs.close();
+		        rs = null;
+
+		        // Comprobar que existe el hospital destino
+		        psHospitalDestino = con.prepareStatement(
+		                "SELECT id_hospital FROM hospital WHERE id_hospital = ?");
+		        psHospitalDestino.setInt(1, m_ID_Hospital_Destino);
+		        rs = psHospitalDestino.executeQuery();
+
+		        if (!rs.next()) {
+		            throw new GestionDonacionesSangreException(
+		                    GestionDonacionesSangreException.HOSPITAL_NO_EXISTE);
+		        }
+
+		        rs.close();
+		        rs = null;
+
+		        java.sql.Date fechaTraspasoSql =
+		                new java.sql.Date(m_Fecha_Traspaso.getTime());
+
+		        // Buscar todos los traspasos que coincidan
+		        psTraspasos = con.prepareStatement(
+		                "SELECT id_traspaso, cantidad " +
+		                "FROM traspaso " +
+		                "WHERE id_tipo_sangre = ? " +
+		                "AND id_hospital_origen = ? " +
+		                "AND id_hospital_destino = ? " +
+		                "AND fecha_traspaso = ?");
+
+		        psTraspasos.setInt(1, m_ID_Tipo_Sangre);
+		        psTraspasos.setInt(2, m_ID_Hospital_Origen);
+		        psTraspasos.setInt(3, m_ID_Hospital_Destino);
+		        psTraspasos.setDate(4, fechaTraspasoSql);
+
+		        rs = psTraspasos.executeQuery();
+
+		        psUpdateDestino = con.prepareStatement(
+		                "UPDATE reserva_hospital " +
+		                "SET cantidad = cantidad - ? " +
+		                "WHERE id_tipo_sangre = ? " +
+		                "AND id_hospital = ?");
+
+		        psUpdateOrigen = con.prepareStatement(
+		                "UPDATE reserva_hospital " +
+		                "SET cantidad = cantidad + ? " +
+		                "WHERE id_tipo_sangre = ? " +
+		                "AND id_hospital = ?");
+
+		        boolean hayTraspasos = false;
+
+		        while (rs.next()) {
+		            hayTraspasos = true;
+
+		            float cantidad = rs.getFloat("cantidad");
+
+		            // La cantidad del traspaso no puede ser negativa
+		            if (cantidad < 0) {
+		                throw new GestionDonacionesSangreException(
+		                        GestionDonacionesSangreException.VALOR_CANTIDAD_TRASPASO_INCORRECTO);
+		            }
+
+		            // Restar del hospital destino
+		            psUpdateDestino.setFloat(1, cantidad);
+		            psUpdateDestino.setInt(2, m_ID_Tipo_Sangre);
+		            psUpdateDestino.setInt(3, m_ID_Hospital_Destino);
+
+		            int filasDestino = psUpdateDestino.executeUpdate();
+
+		            if (filasDestino == 0) {
+		                throw new SQLException(
+		                        "No existe reserva_hospital para el hospital destino y tipo de sangre");
+		            }
+
+		            // Sumar al hospital origen
+		            psUpdateOrigen.setFloat(1, cantidad);
+		            psUpdateOrigen.setInt(2, m_ID_Tipo_Sangre);
+		            psUpdateOrigen.setInt(3, m_ID_Hospital_Origen);
+
+		            int filasOrigen = psUpdateOrigen.executeUpdate();
+
+		            if (filasOrigen == 0) {
+		                throw new SQLException(
+		                        "No existe reserva_hospital para el hospital origen y tipo de sangre");
+		            }
+		        }
+
+		        rs.close();
+		        rs = null;
+
+		        // Borrar los traspasos anulados
+		        if (hayTraspasos) {
+		            psDeleteTraspasos = con.prepareStatement(
+		                    "DELETE FROM traspaso " +
+		                    "WHERE id_tipo_sangre = ? " +
+		                    "AND id_hospital_origen = ? " +
+		                    "AND id_hospital_destino = ? " +
+		                    "AND fecha_traspaso = ?");
+
+		            psDeleteTraspasos.setInt(1, m_ID_Tipo_Sangre);
+		            psDeleteTraspasos.setInt(2, m_ID_Hospital_Origen);
+		            psDeleteTraspasos.setInt(3, m_ID_Hospital_Destino);
+		            psDeleteTraspasos.setDate(4, fechaTraspasoSql);
+
+		            psDeleteTraspasos.executeUpdate();
+		        }
+
+		        con.commit();
 			
 		} catch (SQLException e) {
-			//Completar por el alumno			
+		     if (con != null) {
+		            con.rollback();
+		        }
+
+		        if (e instanceof GestionDonacionesSangreException) {
+		            throw e;
+		        }		
 			
 			logger.error(e.getMessage());
 			throw e;		
 
 		} finally {
-			/*A rellenar por el alumno*/
+			 if (rs != null) rs.close();
+		        if (psTipoSangre != null) psTipoSangre.close();
+		        if (psHospitalOrigen != null) psHospitalOrigen.close();
+		        if (psHospitalDestino != null) psHospitalDestino.close();
+		        if (psTraspasos != null) psTraspasos.close();
+		        if (psUpdateDestino != null) psUpdateDestino.close();
+		        if (psUpdateOrigen != null) psUpdateOrigen.close();
+		        if (psDeleteTraspasos != null) psDeleteTraspasos.close();
+		        if (con != null) con.close();
 		}		
 	}
 	
@@ -447,6 +600,95 @@ PreparedStatement pst_check = null;
 			System.out.println("TEST 5 OK: verifique visualmente el orden");
 		} catch (SQLException e) {
 			System.out.println("TEST 5 ERROR inesperado: " + e.getMessage());
+		}
+		// TESTS DE anular_traspaso
+
+		// Caso 11: anular traspaso correcto
+		try {
+		    reiniciaDatos();
+
+		    /*
+		     * Según tus propios comentarios:
+		     * Tipo A. tiene un traspaso destino=2 fecha=2025-01-11.
+		     * Normalmente será:
+		     * id_tipo_sangre = 1
+		     * hospital origen = 1
+		     * hospital destino = 2
+		     */
+		    anular_traspaso(1, 1, 2, java.sql.Date.valueOf("2025-01-11"));
+
+		    System.out.println("OK anular traspaso correcto");
+
+		    // Opcional: comprobar visualmente que ya no aparece ese traspaso
+		    consulta_traspasos("Tipo A.");
+
+		} catch (SQLException e) {
+		    System.out.println("FALLO anular traspaso correcto: " + e.getMessage());
+		}
+
+
+		// Caso 12: tipo de sangre inexistente
+		try {
+		    reiniciaDatos();
+
+		    anular_traspaso(99, 1, 2, java.sql.Date.valueOf("2025-01-11"));
+
+		    System.out.println("FALLO anular tipo inexistente: no lanzó excepción");
+
+		} catch (GestionDonacionesSangreException e) {
+		    if (e.getErrorCode() == GestionDonacionesSangreException.TIPO_SANGRE_NO_EXISTE) {
+		        System.out.println("OK anular tipo inexistente");
+		    } else {
+		        System.out.println("FALLO anular tipo inexistente: código " + e.getErrorCode());
+		    }
+		}
+
+
+		// Caso 13: hospital origen inexistente
+		try {
+		    reiniciaDatos();
+
+		    anular_traspaso(1, 99, 2, java.sql.Date.valueOf("2025-01-11"));
+
+		    System.out.println("FALLO anular hospital origen inexistente: no lanzó excepción");
+
+		} catch (GestionDonacionesSangreException e) {
+		    if (e.getErrorCode() == GestionDonacionesSangreException.HOSPITAL_NO_EXISTE) {
+		        System.out.println("OK anular hospital origen inexistente");
+		    } else {
+		        System.out.println("FALLO anular hospital origen inexistente: código " + e.getErrorCode());
+		    }
+		}
+
+
+		// Caso 14: hospital destino inexistente
+		try {
+		    reiniciaDatos();
+
+		    anular_traspaso(1, 1, 99, java.sql.Date.valueOf("2025-01-11"));
+
+		    System.out.println("FALLO anular hospital destino inexistente: no lanzó excepción");
+
+		} catch (GestionDonacionesSangreException e) {
+		    if (e.getErrorCode() == GestionDonacionesSangreException.HOSPITAL_NO_EXISTE) {
+		        System.out.println("OK anular hospital destino inexistente");
+		    } else {
+		        System.out.println("FALLO anular hospital destino inexistente: código " + e.getErrorCode());
+		    }
+		}
+
+
+		// Caso 15: no existe ningún traspaso con esos datos
+		// No debe lanzar excepción. Simplemente no borra nada.
+		try {
+		    reiniciaDatos();
+
+		    anular_traspaso(1, 1, 2, java.sql.Date.valueOf("2030-01-01"));
+
+		    System.out.println("OK anular traspaso inexistente: no hay cambios ni excepción");
+
+		} catch (SQLException e) {
+		    System.out.println("FALLO anular traspaso inexistente: " + e.getMessage());
 		}
 	}
 }
